@@ -37,16 +37,15 @@ jobs:
           npx cap sync android
 
       - name: Generate App Icons
-        # Создаем папку assets, кладем туда иконку и запускаем генератор без лишних флагов
         run: |
           mkdir -p assets
           cp icon.png assets/icon.png
           npx capacitor-assets generate --android
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21 # ПЕРЕКЛЮЧАЕМ НА 21 ВЕРСИЮ
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Build APK
