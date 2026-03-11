@@ -1,4 +1,4 @@
-name: Build Android APK (ULTIMATE)
+name: Build Android APK (FINAL)
 on: [push]
 
 jobs:
@@ -12,12 +12,11 @@ jobs:
         with:
           node-version: 24
           
-      - name: Install Everything
+      - name: Install Core Plugins
         run: |
           npm install --legacy-peer-deps
-          # Ставим всё для музыки, шторки и файлов разом
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
-          npm install @capacitor/share @capacitor/filesystem @capacitor-community/media-session
+          # Ставим стабильные официальные плагины для Share и Filesystem
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets @capacitor/share @capacitor/filesystem
           
       - name: Create Capacitor Config
         run: |
@@ -26,10 +25,7 @@ jobs:
             appId: 'com.evgen.music',
             appName: 'Evgen Music',
             webDir: 'dist',
-            server: { androidScheme: 'https' },
-            plugins: {
-              SplashScreen: { launchShowDuration: 2000 }
-            }
+            server: { androidScheme: 'https' }
           };
           export default config;" > capacitor.config.ts
 
@@ -39,16 +35,15 @@ jobs:
       - name: Prepare Android & Permissions
         run: |
           npx cap add android
-          # Магия: прописываем разрешения на фоновый режим и файлы прямо в манифест
+          # Прописываем права на музыку и файлы прямо в системный файл
           sed -i '/<application/i \    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: Generate App Icons
         run: |
           mkdir -p assets
-          cp icon.png assets/icon.png || echo "Icon not found, skipping"
+          cp icon.png assets/icon.png || echo "No icon"
           npx capacitor-assets generate --android
 
       - name: Set up JDK 21
@@ -66,6 +61,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: evgen-music-full
+          name: evgen-music-ready
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
