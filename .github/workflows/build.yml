@@ -5,16 +5,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # Свежая версия, чтобы Гитхаб не ругался
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20 # Ставим Node 20, чтобы быть в тренде и без ошибок
+          node-version: 24 # Убираем предупреждение из логов
           
       - name: Install Dependencies
         run: |
-          npm install
+          npm install --legacy-peer-deps # Игнорируем конфликты версий библиотек
           npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
           
       - name: Create Capacitor Config
@@ -28,17 +28,17 @@ jobs:
           };
           export default config;" > capacitor.config.ts
 
-      - name: Generate App Icons
-        # Эта магия возьмет твой icon.png из корня и сделает из него иконки
-        run: npx capacitor-assets generate --android --icon icon.png
-
       - name: Build Web Project
-        run: npm run build
+        run: npm run build # Собираем твой React/Vite проект из AI Studio
         
       - name: Prepare Android Project
         run: |
           npx cap add android
           npx cap sync android
+
+      - name: Generate App Icons
+        # Теперь иконка генерируется строго после создания папки android
+        run: npx capacitor-assets generate --android --icon icon.png
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -53,7 +53,7 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4 # Актуальная v4 для твоего артефакта
+        uses: actions/upload-artifact@v4
         with:
           name: evgen-music-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
