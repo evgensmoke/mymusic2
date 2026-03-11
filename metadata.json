@@ -1,0 +1,5 @@
+{
+  "name": "EVGEN MUSIC APP",
+  "description": "A music player application that fetches data from GitHub and uses Supabase for likes and metadata.",
+  "requestFramePermissions": []
+}
