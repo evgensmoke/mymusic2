@@ -5,34 +5,55 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # Обновлено до v4
+      - uses: actions/checkout@v4 # Свежая версия, чтобы Гитхаб не ругался
+      
       - name: Setup Node.js
-        uses: actions/setup-node@v4 # Обновлено до v4
+        uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20 # Ставим Node 20, чтобы быть в тренде и без ошибок
+          
       - name: Install Dependencies
         run: |
           npm install
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
+          
+      - name: Create Capacitor Config
+        run: |
+          echo "import { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.evgen.music',
+            appName: 'Evgen Music',
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
+          };
+          export default config;" > capacitor.config.ts
+
+      - name: Generate App Icons
+        # Эта магия возьмет твой icon.png из корня и сделает из него иконки
+        run: npx capacitor-assets generate --android --icon icon.png
+
       - name: Build Web Project
         run: npm run build
-      - name: Initialize Capacitor
+        
+      - name: Prepare Android Project
         run: |
-          npx cap init "Evgen Music" com.evgen.music --web-dir dist
           npx cap add android
-          npx cap sync
+          npx cap sync android
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v4 # Обновлено до v4
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+
       - name: Upload APK
-        uses: actions/upload-artifact@v4 # Тот самый критический фикс до v4
+        uses: actions/upload-artifact@v4 # Актуальная v4 для твоего артефакта
         with:
           name: evgen-music-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
