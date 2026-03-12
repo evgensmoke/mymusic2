@@ -16,40 +16,41 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
+          # Добавляем @capacitor/share, на котором всё ломалось, и другие важные плагины
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets @capacitor/share @capacitor/filesystem @capacitor/app
 
       - name: Build Web Project
         run: |
-          # ВНИМАНИЕ: Если тут будет ошибка — билд остановится. Это нам и нужно.
+          # Теперь билд должен пройти, так как все импорты на месте
           npm run build
 
       - name: Initialize Capacitor
         run: |
-          # Проверь, точно ли твои файлы после билда лежат в 'dist'. 
-          # Если папка называется 'build' или 'www', замени "webDir": "dist" ниже.
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
 
-      - name: Generate Assets (Icon in Root)
+      - name: Generate Assets (Icon from Root)
         run: |
-          # Создаем временную папку для генератора, если её нет
           mkdir -p assets
-          # Если иконка лежит в корне как icon.png, копируем её в assets
-          [ -f "icon.png" ] && cp icon.png assets/icon.png || echo "icon.png не найден в корне"
-          [ -f "icon.jpg" ] && cp icon.jpg assets/icon.png || echo "icon.jpg не найден в корне"
+          # Ищем иконку в корне и копируем её для генератора
+          if [ -f "icon.png" ]; then cp icon.png assets/icon.png; 
+          elif [ -f "icon.jpg" ]; then cp icon.jpg assets/icon.png;
+          fi
           
-          # Запускаем генерацию иконок
           if [ -f "assets/icon.png" ]; then
             npx capacitor-assets generate --android
           else
-            echo "КРИТИЧЕСКАЯ ОШИБКА: Иконка не найдена ни в корне, ни в assets!"
+            echo "ВНИМАНИЕ: Иконка не найдена в корне проекта!"
           fi
 
       - name: Configure Android Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           sed -i '/android.permission.INTERNET/d' $MANIFEST
-          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
+          # Права для фона, интернета и работы с файлами
+          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST
+          # Сервис для корректной работы фонового аудио
+          sed -i 's/<activity/<service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" \/><activity/' $MANIFEST
           npx cap sync android
 
       - name: Set up JDK 21
@@ -67,6 +68,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: music-player-fixed
+          name: evgen-music-fixed
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
