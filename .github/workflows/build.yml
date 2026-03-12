@@ -1,4 +1,4 @@
-name: Build Android APK (FINAL)
+name: Build Android APK (OVERKILL MODE)
 on: [push]
 
 jobs:
@@ -12,38 +12,35 @@ jobs:
         with:
           node-version: 24
           
-      - name: Install Core Plugins
+      - name: Install Native Power
         run: |
           npm install --legacy-peer-deps
-          # Ставим стабильные официальные плагины для Share и Filesystem
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets @capacitor/share @capacitor/filesystem
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
+          npm install @capacitor/app @capacitor/share @capacitor/filesystem
           
-      - name: Create Capacitor Config
-        run: |
-          echo "import { CapacitorConfig } from '@capacitor/cli';
-          const config: CapacitorConfig = {
-            appId: 'com.evgen.music',
-            appName: 'Evgen Music',
-            webDir: 'dist',
-            server: { androidScheme: 'https' }
-          };
-          export default config;" > capacitor.config.ts
-
       - name: Build Web Project
         run: npm run build
         
-      - name: Prepare Android & Permissions
+      - name: Prepare Android & Force Permissions
         run: |
-          npx cap add android
-          # Прописываем права на музыку и файлы прямо в системный файл
+          npx cap add android || true
+          # Взламываем AndroidManifest.xml: добавляем все нужные службы и права
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i \    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.WAKE_LOCK" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
+          
+          # Настройка для фоновой работы внутри тега <application>
+          sed -i '/android:name=".MainActivity"/a \            <service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" />' android/app/src/main/AndroidManifest.xml
+          
           npx cap sync android
 
-      - name: Generate App Icons
+      - name: Generate Icons
         run: |
           mkdir -p assets
-          cp icon.png assets/icon.png || echo "No icon"
+          cp icon.png assets/icon.png || echo "No icon found"
           npx capacitor-assets generate --android
 
       - name: Set up JDK 21
@@ -61,6 +58,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: evgen-music-ready
+          name: evgen-music-ultimate
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
