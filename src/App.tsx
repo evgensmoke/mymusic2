@@ -31,7 +31,7 @@ export default function App() {
       } catch (e) {}
     };
     setup();
-    init();
+    //init();//
 
     // 2. Слушатель состояния приложения (не дает уснуть)
     CapApp.addListener('appStateChange', ({ isActive }) => {
