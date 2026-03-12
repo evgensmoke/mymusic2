@@ -16,26 +16,32 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/app @capacitor/filesystem
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
 
-      - name: Build Web Project
+      - name: Build Web Project (Честный билд)
         run: |
-          npm run build || (mkdir -p dist && echo "<html></html>" > dist/index.html)
+          # Если тут упадет — значит в коде JS ошибка, и билд остановится
+          npm run build 
 
       - name: Initialize Capacitor
         run: |
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
 
+      - name: Generate Icons & Splash (Твои иконки)
+        run: |
+          # Пытаемся создать иконки, если папка assets существует
+          if [ -d "assets" ]; then
+            npx capacitor-assets generate --android
+          else
+            echo "Папка assets не найдена! Положи иконку в assets/icon.png"
+          fi
+
       - name: Configure Android Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          # Удаляем дубликат, если он есть
           sed -i '/android.permission.INTERNET/d' $MANIFEST
-          # Добавляем права на фон и скачивание
-          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST
-          # Регистрируем сервис для музыки
-          sed -i 's/<activity/<service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" \/><activity/' $MANIFEST
+          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
           npx cap sync android
 
       - name: Set up JDK 21
@@ -53,6 +59,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: evgen-music-pro
+          name: evgen-music-with-icons
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
