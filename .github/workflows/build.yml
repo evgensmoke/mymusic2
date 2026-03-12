@@ -1,4 +1,4 @@
-concurrency: name: Build Android APK (THE PRINTERS EDITION)
+name: Build Android APK (THE PRINTERS EDITION)
 on: [push]
 
 jobs:
