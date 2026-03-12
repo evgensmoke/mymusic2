@@ -1,4 +1,4 @@
-name: Build Android APK (Debug Mode)
+name: Build Android APK (Final Masterpiece)
 on: [push]
 
 jobs:
@@ -20,37 +20,44 @@ jobs:
 
       - name: Build Web Project
         run: |
-          # Собираем с относительными путями через флаг
+          # Собираем с относительными путями, чтобы WebView не ослеп
           npm run build -- --base=./
           
-          # Добавляем скрипт отладки прямо в index.html, чтобы видеть ошибки на экране
-          DEBUG_SCRIPT='<script>window.onerror=function(m,u,l){alert("Error: "+m+" at "+u+":"+l);};window.addEventListener("unhandledrejection",function(e){alert("Promise Error: "+e.reason);});</script>'
+          # Инъекция отладчика и заглушки для init на всякий случай
+          DEBUG_SCRIPT='<script>window.onerror=function(m,u,l){alert("Error: "+m+" at "+u+":"+l);};window.init=function(){};</script>'
           sed -i "s|<head>|<head>${DEBUG_SCRIPT}|" dist/index.html
           
-          # На всякий случай еще раз чиним пути, если Vite их проигнорировал
+          # Принудительная замена абсолютных путей на относительные
           sed -i 's/href="\//href=".\//g' dist/index.html
           sed -i 's/src="\//src=".\//g' dist/index.html
 
-      - name: Initialize Capacitor
+      - name: Initialize & Sync Capacitor
         run: |
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
+          npx cap sync android
 
-      - name: Generate Assets
+      - name: Generate Assets (Icons)
         run: |
-          mkdir -p assets
-          [ -f "icon.png" ] && cp icon.png assets/icon.png
-          if [ -f "assets/icon.png" ]; then
+          # Если иконка лежит в корне, генерируем все размеры для Android
+          if [ -f "icon.png" ]; then
+            mkdir -p assets
+            cp icon.png assets/icon.png
             npx capacitor-assets generate --android
           fi
 
-      - name: Configure Android Permissions
+      - name: Configure Android Permissions (Background & Downloads)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          # Полная очистка манифеста от дублей перед вставкой
+          # Чистим дубликаты разрешений, чтобы Android не ругался
           sed -i '/android.permission.INTERNET/d' $MANIFEST
-          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
-          npx cap sync android
+          
+          # Вставляем пакет разрешений для фона и скачивания файлов
+          PERMISSIONS='<uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />'
+          sed -i "/<application/i $PERMISSIONS" $MANIFEST
+          
+          # Фикс для фонового режима в самом теге <application>
+          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' $MANIFEST
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -61,12 +68,14 @@ jobs:
       - name: Build APK
         run: |
           cd android
+          # Укрощаем Java 21 для Gradle
+          echo "org.gradle.java.home=$JAVA_HOME" >> gradle.properties
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: music-app-debug-ui
+          name: evgen-music-final
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
