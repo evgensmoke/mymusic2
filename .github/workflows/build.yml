@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK (Debug Mode)
 on: [push]
 
 jobs:
@@ -20,25 +20,26 @@ jobs:
 
       - name: Build Web Project
         run: |
-          # Собираем проект
-          npm run build
-          # ЛЕЧИМ ЧЕРНЫЙ ЭКРАН: меняем абсолютные пути на относительные в index.html
+          # Собираем с относительными путями через флаг
+          npm run build -- --base=./
+          
+          # Добавляем скрипт отладки прямо в index.html, чтобы видеть ошибки на экране
+          DEBUG_SCRIPT='<script>window.onerror=function(m,u,l){alert("Error: "+m+" at "+u+":"+l);};window.addEventListener("unhandledrejection",function(e){alert("Promise Error: "+e.reason);});</script>'
+          sed -i "s|<head>|<head>${DEBUG_SCRIPT}|" dist/index.html
+          
+          # На всякий случай еще раз чиним пути, если Vite их проигнорировал
           sed -i 's/href="\//href=".\//g' dist/index.html
           sed -i 's/src="\//src=".\//g' dist/index.html
 
       - name: Initialize Capacitor
         run: |
-          # Убеждаемся, что Capacitor знает про папку dist
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
 
-      - name: Generate Assets (Icon from Root)
+      - name: Generate Assets
         run: |
           mkdir -p assets
-          # Копируем твою иконку из корня
           [ -f "icon.png" ] && cp icon.png assets/icon.png
-          [ -f "icon.jpg" ] && cp icon.jpg assets/icon.png
-          
           if [ -f "assets/icon.png" ]; then
             npx capacitor-assets generate --android
           fi
@@ -46,7 +47,7 @@ jobs:
       - name: Configure Android Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          # Чистим дубликаты и добавляем нужные права
+          # Полная очистка манифеста от дублей перед вставкой
           sed -i '/android.permission.INTERNET/d' $MANIFEST
           sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
           npx cap sync android
@@ -66,6 +67,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: music-app-fixed-ui
+          name: music-app-debug-ui
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
