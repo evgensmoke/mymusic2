@@ -27,24 +27,21 @@ jobs:
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
 
-      - name: Fix Java Version
-        run: |
-          find android -name "build.gradle" -exec sed -i 's/JavaVersion.VERSION_21/JavaVersion.VERSION_17/g' {} +
-          find android -name "build.gradle" -exec sed -i 's/sourceCompatibility 21/sourceCompatibility 17/g' {} +
-          find android -name "build.gradle" -exec sed -i 's/targetCompatibility 21/targetCompatibility 17/g' {} +
-
       - name: Configure Android Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
+          # Удаляем дубликат, если он есть
           sed -i '/android.permission.INTERNET/d' $MANIFEST
+          # Добавляем права на фон и скачивание
           sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST
+          # Регистрируем сервис для музыки
           sed -i 's/<activity/<service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" \/><activity/' $MANIFEST
           npx cap sync android
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Build APK
@@ -56,6 +53,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: evgen-music-apk
+          name: evgen-music-pro
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
