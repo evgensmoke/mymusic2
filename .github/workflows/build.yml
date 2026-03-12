@@ -1,63 +1,44 @@
-name: Build Android APK (THE PRINTERS EDITION)
+name: Build Android APK
 on: [push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          
+
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
           npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/app @capacitor/filesystem
-          
+
       - name: Build Web Project
         run: |
-          npm run build || (mkdir -p dist && echo "<html><body>Music Player</body></html>" > dist/index.html)
-        
-      - name: Capacitor Setup
+          npm run build || (mkdir -p dist && echo "<html></html>" > dist/index.html)
+
+      - name: Initialize Capacitor
         run: |
-          # Создаем конфиг с нуля, чтобы не было ошибки Missing appId
           echo '{"appId": "com.evgen.music", "appName": "EVGEN MUSIC", "webDir": "dist"}' > capacitor.config.json
           npx cap add android || true
 
-      - name: Force Java 17 Everywhere
+      - name: Fix Java Version
         run: |
-          # Это лекарство от ошибки "invalid source release: 21"
-          # Ищем все gradle-файлы и принудительно ставим 17-ю версию
           find android -name "build.gradle" -exec sed -i 's/JavaVersion.VERSION_21/JavaVersion.VERSION_17/g' {} +
           find android -name "build.gradle" -exec sed -i 's/sourceCompatibility 21/sourceCompatibility 17/g' {} +
           find android -name "build.gradle" -exec sed -i 's/targetCompatibility 21/targetCompatibility 17/g' {} +
-          # На случай, если версия указана в gradle.properties
-          if [ -f "android/gradle.properties" ]; then sed -i 's/android.useAndroidX=true/android.useAndroidX=true\norg.gradle.java.home=\/usr\/lib\/jvm\/java-17-openjdk-amd64/g' android/gradle.properties; fi
 
-      - name: Inject Background & Download Permissions
+      - name: Configure Android Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          # Удаляем интернет (чтобы не дублировать) и вставляем весь пакет прав
           sed -i '/android.permission.INTERNET/d' $MANIFEST
-          
-          # Блок прав для фона, скачивания и бодрости процессора
-          PERMISSIONS='\
-    <uses-permission android:name="android.permission.INTERNET" />\n\
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n\
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n\
-    <uses-permission android:name="android.permission.WAKE_LOCK" />\n\
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n\
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />'
-          
-          sed -i "/<application/i $PERMISSIONS" $MANIFEST
-          
-          # Регистрация сервиса для фонового аудио (важно для Android 14)
-          SERVICE_TAG='<service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" />'
-          sed -i "s|<activity|$SERVICE_TAG<activity|" $MANIFEST
-          
+          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\n<uses-permission android:name="android.permission.WAKE_LOCK" />\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST
+          sed -i 's/<activity/<service android:name="com.getcapacitor.CapacitorVideoPlayer" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback" \/><activity/' $MANIFEST
           npx cap sync android
 
       - name: Set up JDK 17
@@ -75,6 +56,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: evgen-music-pro-fixed
+          name: evgen-music-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
