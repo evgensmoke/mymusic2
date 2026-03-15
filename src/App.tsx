@@ -1,29 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Константы проекта
+// Константы из твоего проекта
 const S_URL = "https://ojxyjiawdprejvmbsvvj.supabase.co";
 const S_KEY = "sb_publishable_CCjT5fIUcKY-jzlZyzKwLQ_eLfaT1ks";
 const G_USER = 'evgensmoke';
 const G_REPO = 'Mymusic';
 const DEF_IMG = `https://raw.githubusercontent.com/${G_USER}/${G_REPO}/main/default.jpg`;
 
-// Инициализация Supabase
 const sb = createClient(S_URL, S_KEY);
 
 export default function App() {
   const [media, setMedia] = useState({ music: [], podcasts: [], photos: [], texts: [] });
-  const [cat, setCat] = useState('music'); // Текущая категория
+  const [cat, setCat] = useState('music'); 
   const [curId, setCurId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bgImage, setBgImage] = useState(DEF_IMG);
   const [search, setSearch] = useState('');
-  const [modal, setModal] = useState<{show: boolean, content: string}>({ show: false, content: '' });
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Загрузка данных при старте
   useEffect(() => {
     fetchMedia();
     fetchGH('photos');
@@ -41,7 +39,7 @@ export default function App() {
         }));
         setMedia(prev => ({ ...prev, music: formatted }));
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Ошибка Supabase:", e); }
   };
 
   const fetchGH = async (type: 'photos' | 'texts') => {
@@ -57,21 +55,7 @@ export default function App() {
         }));
         setMedia(prev => ({ ...prev, [type]: items }));
       }
-    } catch (e) { console.error(e); }
-  };
-
-  const updateMetadata = (t: any) => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: t.title,
-        artist: 'Evgen Music',
-        artwork: [{ src: t.img || DEF_IMG, sizes: '512x512', type: 'image/jpeg' }]
-      });
-      navigator.mediaSession.setActionHandler('play', togglePlay);
-      navigator.mediaSession.setActionHandler('pause', togglePlay);
-      navigator.mediaSession.setActionHandler('nexttrack', handleNextTrack);
-      navigator.mediaSession.setActionHandler('previoustrack', handlePrevTrack);
-    }
+    } catch (e) {}
   };
 
   const playTrack = (t: any) => {
@@ -84,7 +68,13 @@ export default function App() {
         audioRef.current.play();
         setIsPlaying(true);
         setBgImage(t.img);
-        updateMetadata(t);
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: t.title,
+                artist: 'Evgen Music',
+                artwork: [{ src: t.img, sizes: '512x512', type: 'image/jpeg' }]
+            });
+        }
       }
     }
   };
@@ -96,40 +86,18 @@ export default function App() {
     }
   };
 
-  const handleNextTrack = () => {
-    const list = media.music;
-    const idx = list.findIndex((x: any) => x.id === curId);
-    if (idx < list.length - 1) playTrack(list[idx + 1]);
+  const handleNext = () => {
+    const idx = media.music.findIndex((x: any) => x.id === curId);
+    if (idx < media.music.length - 1) playTrack(media.music[idx + 1]);
   };
 
-  const handlePrevTrack = () => {
-    const list = media.music;
-    const idx = list.findIndex((x: any) => x.id === curId);
-    if (idx > 0) playTrack(list[idx - 1]);
+  const handlePrev = () => {
+    const idx = media.music.findIndex((x: any) => x.id === curId);
+    if (idx > 0) playTrack(media.music[idx - 1]);
   };
 
-  const share = async () => {
-    const t = media.music.find((x: any) => x.id === curId);
-    if (t && navigator.share) try { await navigator.share({ title: t.title, url: t.url }); } catch(e) {}
-  };
-
-  const download = () => {
-    const t = media.music.find((x: any) => x.id === curId);
-    if (!t) return;
-    const a = document.createElement('a');
-    a.href = t.url;
-    a.download = `${t.title}.mp3`;
-    a.click();
-  };
-
-  const openText = async (t: any) => {
-    const res = await fetch(t.url);
-    const txt = await res.text();
-    setModal({ show: true, content: txt });
-  };
-
-  const currentTrack = media.music.find((x: any) => x.id === curId);
-  const displayItems = (media as any)[cat] || [];
+  const curTrack = media.music.find((x: any) => x.id === curId);
+  const list = (media as any)[cat] || [];
 
   return (
     <div className="app-container">
@@ -140,38 +108,44 @@ export default function App() {
       <input 
         className="search-box"
         type="text" 
-        placeholder="Поиск..." 
+        placeholder="Поиск музыки..." 
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
 
+      {/* Категории как на скрине 1 */}
       <div className="category-grid">
-        <div className={`cat-card ${cat==='music'?'active':''}`} onClick={()=>setCat('music')}>🎵<span>Музыка</span></div>
-        <div className={`cat-card ${cat==='podcasts'?'active':''}`} onClick={()=>setCat('podcasts')}>🎙️<span>Подкасты</span></div>
-        <div className={`cat-card ${cat==='photos'?'active':''}`} onClick={()=>setCat('photos')}>📷<span>Фото</span></div>
-        <div className={`cat-card ${cat==='texts'?'active':''}`} onClick={()=>setCat('texts')}>📝<span>Тексты</span></div>
+        <div className={`cat-card ${cat==='music'?'active':''}`} onClick={()=>setCat('music')}>🎵 Музыка</div>
+        <div className={`cat-card ${cat==='podcasts'?'active':''}`} onClick={()=>setCat('podcasts')}>🎙️ Подкасты</div>
+        <div className={`cat-card ${cat==='photos'?'active':''}`} onClick={()=>setCat('photos')}>📷 Фото</div>
+        <div className={`cat-card ${cat==='texts'?'active':''}`} onClick={()=>setCat('texts')}>📝 Тексты</div>
       </div>
 
+      {/* Список треков как на сайте (скрин 2) */}
       <div className={`content-grid ${cat==='photos'?'photo-layout':''}`}>
-        {displayItems.filter((t: any) => t.title.toLowerCase().includes(search.toLowerCase())).map((t: any) => (
+        {list.filter((t:any) => t.title.toLowerCase().includes(search.toLowerCase())).map((t:any) => (
           cat === 'photos' ? (
             <img key={t.id} src={t.img} className="photo-thumb" onClick={() => setBgImage(t.img)} />
           ) : (
-            <div key={t.id} className={`media-item ${curId === t.id ? 'active' : ''}`} onClick={() => cat === 'texts' ? openText(t) : playTrack(t)}>
+            <div key={t.id} className={`media-item ${curId === t.id ? 'active' : ''}`} onClick={() => playTrack(t)}>
               <img className="media-img" src={t.img} alt="" />
               <div className="media-info">
                 <div className="media-name">{t.title}</div>
-                <div className="media-meta">{cat === 'music' ? 'Трек' : cat === 'podcasts' ? 'Эпизод' : 'Текст'}</div>
+                <div className="media-meta">{t.artist || 'evgensmoke'} • {t.duration || '0:00'}</div>
               </div>
-              {curId === t.id && isPlaying && cat !== 'texts' && <div className="playing-icon">🔊</div>}
+              <div className="item-btns">
+                <span>🤍</span>
+                <span>➕</span>
+              </div>
             </div>
           )
         ))}
       </div>
 
-      {currentTrack && (
+      {/* Плеер как на сайте */}
+      {curTrack && (
         <div className="player-panel">
-          <div id="now-playing">{currentTrack.title}</div>
+          <div id="now-playing">СЕЙЧАС ИГРАЕТ: {curTrack.title.toUpperCase()}</div>
           <div className="progress-area" onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             if (audioRef.current) audioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * duration;
@@ -183,18 +157,12 @@ export default function App() {
             <span>{Math.floor(duration/60)}:{String(Math.floor(duration%60)).padStart(2,'0')}</span>
           </div>
           <div className="controls-row">
-            <button className="ctrl-btn" onClick={handlePrevTrack}>⏮</button>
-            <button className="play-btn" onClick={togglePlay}>{isPlaying ? '⏸' : '▶'}</button>
-            <button className="ctrl-btn" onClick={handleNextTrack}>⏭</button>
-            <button className="ctrl-btn" onClick={share}>📤</button>
-            <button className="ctrl-btn" onClick={download}>⬇️</button>
+             <button className="ctrl-btn" onClick={() => {}}>🔗</button>
+             <button className="ctrl-btn" onClick={handlePrev}>⏮</button>
+             <button className="play-btn" onClick={togglePlay}>{isPlaying ? '⏸' : '▶'}</button>
+             <button className="ctrl-btn" onClick={handleNext}>⏭</button>
+             <button className="ctrl-btn" onClick={() => {}}>⬇️</button>
           </div>
-        </div>
-      )}
-
-      {modal.show && (
-        <div id="modal" style={{display:'flex'}} onClick={()=>setModal({show:false, content:''})}>
-          <div id="modal-content" onClick={e=>e.stopPropagation()}>{modal.content}</div>
         </div>
       )}
 
@@ -202,14 +170,15 @@ export default function App() {
         ref={audioRef}
         onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
         onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
-        onEnded={handleNextTrack}
+        onEnded={handleNext}
       />
 
+      {/* Нижняя навигация как на сайте */}
       <nav className="bottom-nav">
         <div className="nav-item active">🏠<span>Главная</span></div>
-        <div className="nav-item">⭐️<span>Избранное</span></div>
-        <div className="nav-item">⚙️<span>Настройки</span></div>
+        <div className="nav-item">📋<span>Каталог</span></div>
+        <div className="nav-item">❤️<span>Моё</span></div>
       </nav>
     </div>
   );
-}
+      }
