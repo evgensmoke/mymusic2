@@ -13,23 +13,26 @@ const sb = createClient(S_URL, S_KEY);
 
 export default function App() {
   const [media, setMedia] = useState({ music: [], podcasts: [], photos: [], texts: [] });
+  const [cat, setCat] = useState('music'); // Текущая категория
   const [curId, setCurId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bgImage, setBgImage] = useState(DEF_IMG);
   const [search, setSearch] = useState('');
+  const [modal, setModal] = useState<{show: boolean, content: string}>({ show: false, content: '' });
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Загрузка данных при старте
   useEffect(() => {
     fetchMedia();
+    fetchGH('photos');
+    fetchGH('texts');
   }, []);
 
   const fetchMedia = async () => {
     try {
-      // Тянем музыку из Supabase
-      const { data, error } = await sb.from('music').select('*').order('id');
+      const { data } = await sb.from('music').select('*').order('id');
       if (data) {
         const formatted = data.map(t => ({
           ...t,
@@ -38,15 +41,30 @@ export default function App() {
         }));
         setMedia(prev => ({ ...prev, music: formatted }));
       }
-    } catch (e) { console.error("Ошибка загрузки:", e); }
+    } catch (e) { console.error(e); }
   };
 
-  // Настройка управления в шторке уведомлений
+  const fetchGH = async (type: 'photos' | 'texts') => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${G_USER}/${G_REPO}/contents/${type}`);
+      const files = await res.json();
+      if (Array.isArray(files)) {
+        const items = files.map((f, i) => ({
+          id: `${type}-${i}`,
+          title: f.name.replace(/\.[^/.]+$/, ""),
+          url: f.download_url,
+          img: type === 'photos' ? f.download_url : DEF_IMG
+        }));
+        setMedia(prev => ({ ...prev, [type]: items }));
+      }
+    } catch (e) { console.error(e); }
+  };
+
   const updateMetadata = (t: any) => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: t.title,
-        artist: t.artist || 'Evgen Music',
+        artist: 'Evgen Music',
         artwork: [{ src: t.img || DEF_IMG, sizes: '512x512', type: 'image/jpeg' }]
       });
       navigator.mediaSession.setActionHandler('play', togglePlay);
@@ -73,33 +91,26 @@ export default function App() {
 
   const togglePlay = () => {
     if (audioRef.current) {
-      if (audioRef.current.paused) {
-        audioRef.current.play();
-        setIsPlaying(true);
-      } else {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      }
+      audioRef.current.paused ? audioRef.current.play() : audioRef.current.pause();
+      setIsPlaying(!audioRef.current.paused);
     }
   };
 
   const handleNextTrack = () => {
-    const idx = media.music.findIndex((x: any) => x.id === curId);
-    if (idx < media.music.length - 1) playTrack(media.music[idx + 1]);
+    const list = media.music;
+    const idx = list.findIndex((x: any) => x.id === curId);
+    if (idx < list.length - 1) playTrack(list[idx + 1]);
   };
 
   const handlePrevTrack = () => {
-    const idx = media.music.findIndex((x: any) => x.id === curId);
-    if (idx > 0) playTrack(media.music[idx - 1]);
+    const list = media.music;
+    const idx = list.findIndex((x: any) => x.id === curId);
+    if (idx > 0) playTrack(list[idx - 1]);
   };
 
   const share = async () => {
     const t = media.music.find((x: any) => x.id === curId);
-    if (t && navigator.share) {
-      try { await navigator.share({ title: t.title, url: t.url }); } catch(e) {}
-    } else {
-      alert("Ссылка скопирована!"); // Заглушка
-    }
+    if (t && navigator.share) try { await navigator.share({ title: t.title, url: t.url }); } catch(e) {}
   };
 
   const download = () => {
@@ -108,12 +119,17 @@ export default function App() {
     const a = document.createElement('a');
     a.href = t.url;
     a.download = `${t.title}.mp3`;
-    document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+  };
+
+  const openText = async (t: any) => {
+    const res = await fetch(t.url);
+    const txt = await res.text();
+    setModal({ show: true, content: txt });
   };
 
   const currentTrack = media.music.find((x: any) => x.id === curId);
+  const displayItems = (media as any)[cat] || [];
 
   return (
     <div className="app-container">
@@ -121,48 +137,64 @@ export default function App() {
       
       <h1 className="main-title">EVGEN MUSIC</h1>
       
-      <div className="search-box">
-        <input 
-          type="text" 
-          placeholder="Поиск музыки..." 
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <input 
+        className="search-box"
+        type="text" 
+        placeholder="Поиск..." 
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="category-grid">
+        <div className={`cat-card ${cat==='music'?'active':''}`} onClick={()=>setCat('music')}>🎵<span>Музыка</span></div>
+        <div className={`cat-card ${cat==='podcasts'?'active':''}`} onClick={()=>setCat('podcasts')}>🎙️<span>Подкасты</span></div>
+        <div className={`cat-card ${cat==='photos'?'active':''}`} onClick={()=>setCat('photos')}>📷<span>Фото</span></div>
+        <div className={`cat-card ${cat==='texts'?'active':''}`} onClick={()=>setCat('texts')}>📝<span>Тексты</span></div>
       </div>
 
-      <div className="track-list">
-        {media.music.filter((t: any) => t.title.toLowerCase().includes(search.toLowerCase())).map((t: any) => (
-          <div key={t.id} className={`track-card ${curId === t.id ? 'active' : ''}`} onClick={() => playTrack(t)}>
-            <img src={t.img} alt={t.title} />
-            <div className="track-info">
-              <div className="track-name">{t.title}</div>
-              <div className="track-artist">{t.artist || 'Evgen Music'}</div>
+      <div className={`content-grid ${cat==='photos'?'photo-layout':''}`}>
+        {displayItems.filter((t: any) => t.title.toLowerCase().includes(search.toLowerCase())).map((t: any) => (
+          cat === 'photos' ? (
+            <img key={t.id} src={t.img} className="photo-thumb" onClick={() => setBgImage(t.img)} />
+          ) : (
+            <div key={t.id} className={`media-item ${curId === t.id ? 'active' : ''}`} onClick={() => cat === 'texts' ? openText(t) : playTrack(t)}>
+              <img className="media-img" src={t.img} alt="" />
+              <div className="media-info">
+                <div className="media-name">{t.title}</div>
+                <div className="media-meta">{cat === 'music' ? 'Трек' : cat === 'podcasts' ? 'Эпизод' : 'Текст'}</div>
+              </div>
+              {curId === t.id && isPlaying && cat !== 'texts' && <div className="playing-icon">🔊</div>}
             </div>
-            <button className="card-play-btn">{curId === t.id && isPlaying ? '⏸' : '▶'}</button>
-          </div>
+          )
         ))}
       </div>
 
       {currentTrack && (
-        <div className="bottom-player">
-          <div className="progress-container" onClick={(e) => {
+        <div className="player-panel">
+          <div id="now-playing">{currentTrack.title}</div>
+          <div className="progress-area" onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
-            const pos = (e.clientX - rect.left) / rect.width;
-            if (audioRef.current) audioRef.current.currentTime = pos * duration;
+            if (audioRef.current) audioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * duration;
           }}>
-            <div className="progress-bar" style={{ width: `${(currentTime/duration)*100}%` }}></div>
+            <div id="progress-fill" style={{ width: `${(currentTime/duration)*100}%` }}></div>
           </div>
-          
+          <div className="time-info">
+            <span>{Math.floor(currentTime/60)}:{String(Math.floor(currentTime%60)).padStart(2,'0')}</span>
+            <span>{Math.floor(duration/60)}:{String(Math.floor(duration%60)).padStart(2,'0')}</span>
+          </div>
           <div className="controls-row">
             <button className="ctrl-btn" onClick={handlePrevTrack}>⏮</button>
             <button className="play-btn" onClick={togglePlay}>{isPlaying ? '⏸' : '▶'}</button>
             <button className="ctrl-btn" onClick={handleNextTrack}>⏭</button>
+            <button className="ctrl-btn" onClick={share}>📤</button>
+            <button className="ctrl-btn" onClick={download}>⬇️</button>
           </div>
-          
-          <div className="extra-controls">
-            <button onClick={share}>📤</button>
-            <button onClick={download}>⬇️</button>
-          </div>
+        </div>
+      )}
+
+      {modal.show && (
+        <div id="modal" style={{display:'flex'}} onClick={()=>setModal({show:false, content:''})}>
+          <div id="modal-content" onClick={e=>e.stopPropagation()}>{modal.content}</div>
         </div>
       )}
 
@@ -175,8 +207,8 @@ export default function App() {
 
       <nav className="bottom-nav">
         <div className="nav-item active">🏠<span>Главная</span></div>
-        <div className="nav-item">🎙️<span>Подкасты</span></div>
-        <div className="nav-item">👤<span>Профиль</span></div>
+        <div className="nav-item">⭐️<span>Избранное</span></div>
+        <div className="nav-item">⚙️<span>Настройки</span></div>
       </nav>
     </div>
   );
