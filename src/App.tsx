@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+// Если еще не ставил, выполни: npm install @capacitor-community/media-session
+import { MediaSession } from '@capacitor-community/media-session'; 
 
 const S_URL = "https://ojxyjiawdprejvmbsvvj.supabase.co";
 const S_KEY = "sb_publishable_CCjT5fIUcKY-jzlZyzKwLQ_eLfaT1ks";
 const G_USER = 'evgensmoke';
 const G_REPO = 'Mymusic';
 const G_TOKEN = "ghp_VXbn0E4In66FtN1bFaV1i8W9kfphT" + "T10FM6e";
-const DEF_IMG = 
-  `https://raw.githubusercontent.com/${G_USER}/${G_REPO}/main/default.jpg`;
+const DEF_IMG = `https://raw.githubusercontent.com/${G_USER}/${G_REPO}/main/default.jpg`;
 
 const sb = createClient(S_URL, S_KEY);
 
@@ -27,22 +30,47 @@ export default function App() {
 
   useEffect(() => { initApp(); }, []);
 
-  // Инициализация шторки
+  // Инициализация Нативной Шторки через Capacitor
   useEffect(() => {
-    const track = [...media.music, ...media.podcasts].find(x => x.id === curId);
-    if (track && 'mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title,
-        artist: track.artist || 'Unknown',
-        artwork: [{ src: track.img || DEF_IMG, sizes: '512x512', type: 'image/jpeg' }]
-      });
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    const setupMediaSession = async () => {
+      const track = [...media.music, ...media.podcasts].find(x => x.id === curId);
+      if (!track) return;
+
+      try {
+        await MediaSession.setMetadata({
+          title: track.title,
+          artist: track.artist || 'Evgen Music',
+          album: 'EVGEN MUSIC APP',
+          artwork: track.img || DEF_IMG
+        });
+
+        await MediaSession.setPlaybackState({
+          playbackState: isPlaying ? 'playing' : 'paused',
+          position: currentTime,
+          playbackRate: 1.0
+        });
+
+        MediaSession.addListener('play', () => { audioRef.current?.play(); });
+        MediaSession.addListener('pause', () => { audioRef.current?.pause(); });
+        MediaSession.addListener('next', () => { handleNextTrack(); });
+        MediaSession.addListener('previous', () => { handlePrevTrack(); });
+      } catch (e) {
+        console.log("Плагин MediaSession не установлен или ошибка", e);
+      }
       
-      navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
-      navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
-      navigator.mediaSession.setActionHandler('nexttrack', handleNextTrack);
-      navigator.mediaSession.setActionHandler('previoustrack', handlePrevTrack);
-    }
+      // На всякий случай оставляем и веб-версию
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: track.title, artist: track.artist || 'Evgen Music', artwork: [{ src: track.img || DEF_IMG, sizes: '512x512', type: 'image/jpeg' }]
+        });
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+        navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
+        navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
+        navigator.mediaSession.setActionHandler('nexttrack', handleNextTrack);
+        navigator.mediaSession.setActionHandler('previoustrack', handlePrevTrack);
+      }
+    };
+    setupMediaSession();
   }, [curId, isPlaying, media]);
 
   const initApp = async () => {
@@ -82,11 +110,8 @@ export default function App() {
   const toggleLike = async (e: any, t: any) => {
     e.stopPropagation();
     const key = 'lk_' + t.id;
-    if (localStorage.getItem(key)) {
-      t.likes--; localStorage.removeItem(key);
-    } else {
-      t.likes++; localStorage.setItem(key, '1');
-    }
+    if (localStorage.getItem(key)) { t.likes--; localStorage.removeItem(key); } 
+    else { t.likes++; localStorage.setItem(key, '1'); }
     setUpdater(u => u + 1);
     await sb.from('likes').upsert({ song_id: t.id, count: t.likes }, { onConflict: 'song_id' });
   };
@@ -130,37 +155,41 @@ export default function App() {
   };
 
   const handleSeek = (seconds: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime += seconds;
-    }
+    if (audioRef.current) audioRef.current.currentTime += seconds;
   };
 
-  // Поделиться без Capacitor, чисто веб-апишка
+  // --- ПОЧИНЕННЫЙ ШАРИНГ ЧЕРЕЗ CAPACITOR ---
   const handleShare = async () => {
     const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
-    if (t && navigator.share) {
-      try {
-        await navigator.share({ title: t.title, text: 'Слушай на Evgen Music', url: t.url });
-      } catch (e) { /* Игнорим если юзер сам отменил */ }
-    } else {
-      alert("Функция 'Поделиться' не поддерживается на вашем устройстве.");
+    if (!t) return;
+    try {
+      await Share.share({
+        title: t.title,
+        text: `Слушай трек: ${t.title} в Evgen Music!`,
+        url: t.url,
+      });
+    } catch (e) {
+      console.log('Ошибка шаринга (или юзер отменил):', e);
     }
   };
 
-  // Скачивание без prompt. Только confirm.
+  // --- ПОЧИНЕННОЕ СКАЧИВАНИЕ ЧЕРЕЗ CAPACITOR ---
   const handleDownload = async () => {
     const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
     if (!t) return;
     
     if (window.confirm(`Сохранить трек: ${t.title}?`)) {
       try {
-        const res = await fetch(t.url);
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `${t.title}.mp3`;
-        a.click();
-      } catch (e) { alert("Ошибка загрузки"); }
+        await Filesystem.downloadFile({
+          url: t.url,
+          path: `Download/${t.title}.mp3`,
+          directory: Directory.ExternalStorage
+        });
+        alert(`Трек успешно сохранен в папку "Загрузки"!`);
+      } catch (e) {
+        alert("Ошибка скачивания. Проверь разрешения приложения на доступ к файлам.");
+        console.error("Download Error:", e);
+      }
     }
   };
 
@@ -175,7 +204,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Вернул нормальный фон с blur'ом из твоего CSS */}
       <div id="bg-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
       <h1 className="main-title">EVGEN MUSIC</h1>
       
@@ -236,33 +264,26 @@ export default function App() {
             <span>{formatTime(duration)}</span>
           </div>
           <div className="controls-row">
-            {/* Иконка 'Поделиться' */}
             <button className="ctrl-btn" onClick={handleShare}>
               <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg>
             </button>
-            {/* Иконка '-10 сек' */}
             <button className="ctrl-btn" onClick={() => handleSeek(-10)}>
               <svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
             </button>
-            {/* Иконка 'Предыдущий трек' */}
             <button className="ctrl-btn" onClick={handlePrevTrack}>
               <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
             </button>
-            {/* Иконка 'Плей / Пауза' */}
             <button className="play-btn" onClick={() => playTrack(currentTrack)}>
               <svg viewBox="0 0 24 24" width="30" height="30">
                 {isPlaying ? <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/> : <path d="M8 5v14l11-7z"/>}
               </svg>
             </button>
-            {/* Иконка 'Следующий трек' */}
             <button className="ctrl-btn" onClick={handleNextTrack}>
               <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
             </button>
-            {/* Иконка '+10 сек' */}
             <button className="ctrl-btn" onClick={() => handleSeek(10)}>
               <svg viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
             </button>
-            {/* Иконка 'Скачать' */}
             <button className="ctrl-btn" onClick={handleDownload}>
               <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
             </button>
@@ -272,16 +293,13 @@ export default function App() {
 
       <nav className="bottom-nav">
         <div className={`nav-item ${activeTab==='home'?'active':''}`} onClick={() => setActiveTab('home')}>
-          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-          <span>Главная</span>
+          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>Главная</span>
         </div>
         <div className={`nav-item ${activeTab==='catalog'?'active':''}`} onClick={() => setActiveTab('catalog')}>
-          <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
-          <span>Каталог</span>
+          <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg><span>Каталог</span>
         </div>
         <div className={`nav-item ${activeTab==='my'?'active':''}`} onClick={() => setActiveTab('my')}>
-          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-          <span>Моё</span>
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg><span>Моё</span>
         </div>
       </nav>
 
