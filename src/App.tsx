@@ -71,22 +71,49 @@ export default function App() {
         }
     };
 
+    const toggleLike = async (e: any, t: any) => {
+        e.stopPropagation();
+        const key = 'lk_' + t.id;
+        if (localStorage.getItem(key)) { t.likes--; localStorage.removeItem(key); } 
+        else { t.likes++; localStorage.setItem(key, '1'); }
+        setUpdater(u => u + 1);
+        await sb.from('likes').upsert({ song_id: t.id, count: t.likes }, { onConflict: 'song_id' });
+    };
+
+    const toggleFav = (e: any, t: any) => {
+        e.stopPropagation();
+        const key = 'fav_' + t.id;
+        localStorage.getItem(key) ? localStorage.removeItem(key) : localStorage.setItem(key, '1');
+        setUpdater(u => u + 1);
+    };
+
     const handleShare = () => {
         const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
-        if (t && navigator.share) navigator.share({ title: t.title, url: t.url }).catch(()=>{});
+        if (navigator.share) navigator.share({ title: t?.title, url: window.location.href }).catch(()=>{});
     };
 
     const handleDownload = async () => {
         const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
         if (!t) return;
-        const a = document.createElement('a'); a.href = t.url; a.download = `${t.title}.mp3`; a.click();
+        try {
+            const r = await fetch(t.url);
+            const b = await r.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(b);
+            a.download = t.title + ".mp3";
+            a.click();
+        } catch(e) { alert("Ошибка при скачивании"); }
     };
 
     const openText = async (item: any) => {
         try {
             const r = await fetch(item.url);
             const b = await r.arrayBuffer();
-            const txt = new TextDecoder('utf-8').decode(b);
+            // Сначала пробуем UTF-8, если есть битые символы () - пробуем windows-1251
+            let txt = new TextDecoder('utf-8').decode(b);
+            if (txt.includes('')) {
+                txt = new TextDecoder('windows-1251').decode(b);
+            }
             setModal({ show: true, content: txt, type: 'text' });
         } catch (e) { alert("Ошибка загрузки текста"); }
     };
@@ -108,27 +135,32 @@ export default function App() {
     return (
         <div className="app-container">
             <style>{`
-                .app-container { padding-bottom: 240px; color: white; font-family: 'Inter', sans-serif; }
+                .app-container { padding-bottom: 240px; color: white; font-family: 'Inter', sans-serif; position: relative; min-height: 100vh; }
                 #bg-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; background-size: cover; background-position: center; filter: blur(20px) brightness(0.4); transition: 0.5s; transform: scale(1.1); }
                 .main-title { font-family: 'Orbitron', sans-serif; text-align: center; color: #00f2ff; text-shadow: 0 0 10px #00f2ff; margin: 20px 0; }
                 .search-box { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; margin-bottom: 15px; }
-                .media-item { display: flex; align-items: center; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 8px; border: 1px solid transparent; }
+                .media-item { display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 8px; border: 1px solid transparent; }
                 .media-item.active { border-color: #00f2ff; background: rgba(0, 242, 255, 0.1); }
-                .media-img { width: 50px; height: 50px; border-radius: 8px; margin-right: 12px; object-fit: cover; }
+                .media-left { display: flex; align-items: center; flex: 1; overflow: hidden; }
+                .media-img { width: 50px; height: 50px; border-radius: 8px; margin-right: 12px; object-fit: cover; flex-shrink: 0; }
+                .media-info { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 10px; }
+                .media-name { font-weight: 600; font-size: 14px; text-overflow: ellipsis; overflow: hidden; }
+                .item-btns { display: flex; gap: 12px; font-size: 18px; align-items: center; flex-shrink: 0; cursor: pointer; }
                 .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
                 .photo-item { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; cursor: pointer; }
-                .player-panel { position: fixed; bottom: 85px; left: 10px; right: 10px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 15px; backdrop-filter: blur(15px); z-index: 100; }
-                .progress-area { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; position: relative; margin: 10px 0; cursor: pointer; }
-                #progress-fill { height: 100%; background: #00f2ff; border-radius: 3px; box-shadow: 0 0 8px #00f2ff; }
-                .controls-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
-                .ctrl-btn { background: none; border: none; color: white; width: 32px; height: 32px; cursor: pointer; padding: 0; opacity: 0.8; }
-                .play-btn { background: #00f2ff; border: none; border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; color: black; box-shadow: 0 0 15px #00f2ff; }
+                .player-panel { position: fixed; bottom: 85px; left: 10px; right: 10px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 15px; backdrop-filter: blur(15px); z-index: 100; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); }
+                .progress-area { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; position: relative; margin: 15px 0 5px 0; cursor: pointer; }
+                #progress-fill { height: 100%; background: #00f2ff; border-radius: 3px; box-shadow: 0 0 8px #00f2ff; transition: width 0.1s linear; }
+                .time-info { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 10px; }
+                .controls-row { display: flex; justify-content: space-between; align-items: center; }
+                .ctrl-btn { background: none; border: none; color: white; width: 32px; height: 32px; cursor: pointer; padding: 0; opacity: 0.8; display: flex; align-items: center; justify-content: center; }
+                .play-btn { background: #00f2ff; border: none; border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; color: black; box-shadow: 0 0 15px #00f2ff; cursor: pointer; }
                 .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: rgba(2, 6, 23, 0.95); display: flex; justify-content: space-around; align-items: center; border-top: 1px solid rgba(255,255,255,0.1); z-index: 101; }
-                .nav-item { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: #64748b; text-decoration: none; }
+                .nav-item { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: #64748b; text-decoration: none; cursor: pointer; }
                 .nav-item.active { color: #00f2ff; }
                 .nav-item svg { width: 24px; height: 24px; margin-bottom: 4px; }
                 #modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-                #modal-content { color: white; white-space: pre-wrap; width: 100%; height: 100%; overflow-y: auto; font-size: 16px; line-height: 1.5; }
+                #modal-content { color: white; white-space: pre-wrap; width: 100%; height: 100%; overflow-y: auto; font-size: 16px; line-height: 1.5; padding-bottom: 40px; }
                 .full-img { max-width: 100%; max-height: 90%; object-fit: contain; }
             `}</style>
 
@@ -139,7 +171,7 @@ export default function App() {
             {activeTab === 'catalog' && (
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'15px'}}>
                     {['music', 'podcasts', 'photos', 'texts'].map(c => (
-                        <div key={c} style={{padding:'12px', background: activeCat===c?'#00f2ff':'rgba(255,255,255,0.1)', borderRadius:'12px', textAlign:'center', color:activeCat===c?'#000':'#fff', fontWeight:'600'}}
+                        <div key={c} style={{padding:'12px', background: activeCat===c?'#00f2ff':'rgba(255,255,255,0.1)', borderRadius:'12px', textAlign:'center', color:activeCat===c?'#000':'#fff', fontWeight:'600', cursor:'pointer'}}
                              onClick={() => { if(c==='podcasts' && prompt("Пароль:")!=='1285') return; setActiveCat(c); }}>
                             {c.toUpperCase()}
                         </div>
@@ -154,14 +186,24 @@ export default function App() {
                             <img key={p.url} src={p.url} className="photo-item" onClick={() => setModal({show:true, content:p.url, type:'image'})} />
                         ))}
                     </div>
+                ) : activeCat === 'texts' && activeTab === 'catalog' ? (
+                    getPlaylist().filter((i:any)=>(i.title||'').toLowerCase().includes(search.toLowerCase())).map((item: any) => (
+                        <div key={item.url} className="media-item" onClick={() => openText(item)} style={{cursor:'pointer'}}>
+                            📄 {item.title}
+                        </div>
+                    ))
                 ) : (
                     getPlaylist().filter((i:any)=>(i.title||'').toLowerCase().includes(search.toLowerCase())).map((item: any) => (
-                        <div key={item.id || item.url} className={`media-item ${curId === item.id ? 'active' : ''}`} 
-                             onClick={() => activeCat === 'texts' ? openText(item) : play(item)}>
-                            {activeCat !== 'texts' && <img className="media-img" src={item.img || DEF_IMG} />}
-                            <div style={{flex:1}}>
-                                <div style={{fontWeight:'600'}}>{item.title}</div>
-                                {item.artist && <div style={{fontSize:'12px', opacity:0.6}}>{item.artist}</div>}
+                        <div key={item.id} className={`media-item ${curId === item.id ? 'active' : ''}`} onClick={() => play(item)}>
+                            <div className="media-left">
+                                <img className="media-img" src={item.img || DEF_IMG} />
+                                <div className="media-info">
+                                    <div className="media-name">{item.title}</div>
+                                </div>
+                            </div>
+                            <div className="item-btns">
+                                <span onClick={(e) => toggleLike(e, item)}>{localStorage.getItem('lk_'+item.id) ? '❤️' : '🤍'}</span>
+                                <span onClick={(e) => toggleFav(e, item)}>{localStorage.getItem('fav_'+item.id) ? '⭐' : '➕'}</span>
                             </div>
                         </div>
                     ))
@@ -170,7 +212,7 @@ export default function App() {
 
             {currentTrack && (
                 <div className="player-panel">
-                    <div style={{textAlign:'center', fontWeight:'bold', fontSize:'14px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}
+                    <div style={{textAlign:'center', fontWeight:'bold', fontSize:'14px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', cursor:'pointer'}}
                          onClick={() => currentTrack.lyrics && setModal({show:true, content: currentTrack.lyrics, type:'text'})}>
                         {currentTrack.title}
                     </div>
@@ -180,7 +222,7 @@ export default function App() {
                     }}>
                         <div id="progress-fill" style={{ width: `${(currentTime/duration)*100 || 0}%` }}></div>
                     </div>
-                    <div style={{display:'flex', justifyContent:'space-between', fontSize:'11px', opacity:0.7, marginTop:'-5px', marginBottom:'5px'}}>
+                    <div className="time-info">
                         <span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span>
                     </div>
                     <div className="controls-row">
