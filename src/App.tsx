@@ -1,181 +1,323 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// --- КОНФИГ ---
 const S_URL = "https://ojxyjiawdprejvmbsvvj.supabase.co";
 const S_KEY = "sb_publishable_CCjT5fIUcKY-jzlZyzKwLQ_eLfaT1ks";
 const G_USER = 'evgensmoke';
 const G_REPO = 'Mymusic';
-const G_TOKEN = "ghp_VXbn0E4In66FtN1bFaV1i8W9kfphT" + "T10FM6e";
 const DEF_IMG = `https://raw.githubusercontent.com/${G_USER}/${G_REPO}/main/default.jpg`;
+const G_TOKEN = "ghp_VXbn0E4In66FtN1bFaV1i8W9kfphT" + "T10FM6e";
+const PODCAST_PASS = "1285";
 
 let sb: any = null;
 try { sb = createClient(S_URL, S_KEY); } catch (e) {}
 
+// --- ТИПЫ ---
+type Track = {
+  id: string; title: string; artist: string; url: string; img: string;
+  duration: string; likes: number; lyrics: string; cat: 'music' | 'podcasts';
+};
+type Photo = { url: string };
+type TextItem = { title: string; url: string };
+type TabType = 'home' | 'catalog' | 'my';
+type CatType = 'music' | 'podcasts' | 'photos' | 'texts';
+
 export default function App() {
-  const [media, setMedia] = useState({ music: [], podcasts: [], photos: [], texts: [] });
-  const [currentTab, setCurrentTab] = useState('home');
-  const [currentCategory, setCurrentCategory] = useState('music');
-  const [curId, setCurId] = useState(null);
+  const [media, setMedia] = useState<{ music: Track[]; podcasts: Track[]; photos: Photo[]; texts: TextItem[] }>({
+    music: [], podcasts: [], photos: [], texts: []
+  });
+  const [currentTab, setCurrentTab] = useState<TabType>('home');
+  const [currentCategory, setCurrentCategory] = useState<CatType>('music');
+  const [curId, setCurId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [modal, setModal] = useState({ show: false, content: '', type: 'text' });
-  const [myOrder, setMyOrder] = useState(JSON.parse(localStorage.getItem('my_order') || '[]'));
-  
-  const audioRef = useRef(null);
-  const dragItem = useRef(null);
-  const dragOverItem = useRef(null);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [bgImage, setBgImage] = useState<string>('');
+  const [modalContent, setModalContent] = useState<string | null>(null);
+  const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [customOrder, setCustomOrder] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
-  useEffect(() => { init(); }, []);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const init = async () => {
+  useEffect(() => {
+    if (!window.hasOwnProperty('jsmediatags')) {
+      const script = document.createElement('script');
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js";
+      document.body.appendChild(script);
+    }
+    const savedOrder = localStorage.getItem('evgen_track_order');
+    if (savedOrder) { try { setCustomOrder(JSON.parse(savedOrder)); } catch (e) {} }
+    initData();
+  }, []);
+
+  const initData = async () => {
     const paths = ['music', 'podcasts', 'photos', 'texts'];
-    const results = await Promise.all(paths.map(p => 
-      fetch(`https://api.github.com/repos/${G_USER}/${G_REPO}/contents/${p}`, { headers: { 'Authorization': `token ${G_TOKEN}` } })
-      .then(r => r.json()).catch(() => [])
-    ));
+    const results = await Promise.all(paths.map(async (p) => {
+      try {
+        const r = await fetch(`https://api.github.com/repos/${G_USER}/${G_REPO}/contents/${p}`, {
+          headers: { 'Authorization': `token ${G_TOKEN}` }
+        });
+        return r.ok ? await r.json() : [];
+      } catch { return []; }
+    }));
     
-    const mapTrack = (f) => ({
-      id: f.name.replace('.mp3', ''), title: decodeURIComponent(f.name.replace('.mp3', '')),
-      url: f.download_url, img: DEF_IMG, likes: 0, lyrics: ''
+    const mapTrack = (f: any, cat: 'music' | 'podcasts'): Track => ({
+      id: f.name.replace('.mp3', ''),
+      title: decodeURIComponent(f.name.replace('.mp3', '')),
+      artist: 'Unknown', url: f.download_url, img: DEF_IMG,
+      duration: '0:00', likes: 0, lyrics: '', cat
     });
 
     const newMedia = {
-      music: results[0].filter(f => f.name?.endsWith('.mp3')).map(mapTrack).reverse(),
-      podcasts: results[1].filter(f => f.name?.endsWith('.mp3')).map(mapTrack).reverse(),
-      photos: results[2].filter(f => /\.(jpg|png|webp|jpeg)$/i.test(f.name)).map(f => ({ url: f.download_url })),
-      texts: results[3].filter(f => f.name?.endsWith('.txt')).map(f => ({ title: f.name.replace('.txt', ''), url: f.download_url }))
+      music: (results[0] || []).filter((f: any) => f.name.endsWith('.mp3')).map((f: any) => mapTrack(f, 'music')).reverse(),
+      podcasts: (results[1] || []).filter((f: any) => f.name.endsWith('.mp3')).map((f: any) => mapTrack(f, 'podcasts')).reverse(),
+      photos: (results[2] || []).filter((f: any) => /\.(jpg|png|webp|jpeg)$/i.test(f.name)).map((f: any) => ({ url: f.download_url })).reverse(),
+      texts: (results[3] || []).filter((f: any) => f.name.endsWith('.txt')).map((f: any) => ({ title: f.name.replace('.txt', ''), url: f.download_url })).reverse()
     };
 
     if (sb) {
       const { data } = await sb.from('likes').select('*');
-      data?.forEach(r => {
-        const t = [...newMedia.music, ...newMedia.podcasts].find(x => x.id === r.song_id);
-        if (t) { t.likes = r.count || 0; if (r.cover_data) t.img = r.cover_data; t.lyrics = r.lyrics || ''; }
-      });
+      if (data) {
+        data.forEach((r: any) => {
+          const t = [...newMedia.music, ...newMedia.podcasts].find(x => x.id === r.song_id);
+          if (t) {
+            t.likes = r.count || 0;
+            if (r.duration && r.duration !== '0:00') t.duration = r.duration;
+            if (r.artist) t.artist = r.artist;
+            if (r.cover_data) t.img = r.cover_data;
+            if (r.lyrics) t.lyrics = r.lyrics;
+          }
+        });
+      }
     }
     setMedia(newMedia);
   };
 
-  const handleSort = () => {
-    const _order = [...myOrder];
-    const draggedItemContent = _order.splice(dragItem.current, 1)[0];
-    _order.splice(dragOverItem.current, 0, draggedItemContent);
-    setMyOrder(_order);
-    localStorage.setItem('my_order', JSON.stringify(_order));
+  const updateMediaMetadata = useCallback((t: Track) => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: t.title, artist: t.artist,
+        artwork: [{ src: t.img, sizes: '512x512', type: 'image/jpeg' }]
+      });
+    }
+  }, []);
+
+  const playTrack = (t: Track) => {
+    if (curId === t.id) { togglePlay(); return; }
+    setCurId(t.id);
+    if (audioRef.current) {
+      audioRef.current.src = t.url;
+      audioRef.current.onloadedmetadata = () => {
+        if (audioRef.current) {
+          setAudioDuration(audioRef.current.duration);
+          updateMediaMetadata(t);
+        }
+      };
+      audioRef.current.play();
+      setIsPlaying(true);
+      setBgImage(t.img);
+    }
   };
 
-  const play = (t) => {
-    if (curId === t.id) {
-      if (audioRef.current.paused) audioRef.current.play(); else audioRef.current.pause();
-    } else {
-      setCurId(t.id);
-      audioRef.current.src = t.url;
-      audioRef.current.play();
+  const togglePlay = () => {
+    if (audioRef.current) {
+      if (audioRef.current.paused) { audioRef.current.play(); setIsPlaying(true); }
+      else { audioRef.current.pause(); setIsPlaying(false); }
     }
-    setIsPlaying(!audioRef.current.paused);
   };
-    const download = async () => {
+
+  const handleNextTrack = useCallback(() => {
+    let l = currentCategory === 'podcasts' ? media.podcasts : media.music;
+    let i = l.findIndex(x => x.id === curId);
+    if (i < l.length - 1 && i !== -1) playTrack(l[i + 1]);
+  }, [curId, currentCategory, media]);
+
+  const handlePrevTrack = useCallback(() => {
+    let l = currentCategory === 'podcasts' ? media.podcasts : media.music;
+    let i = l.findIndex(x => x.id === curId);
+    if (i > 0) playTrack(l[i - 1]);
+  }, [curId, currentCategory, media]);
+
+  // Копируй это и жди Часть 2...
+      // --- ПРОДОЛЖЕНИЕ ЛОГИКИ (ВЗАИМОДЕЙСТВИЯ) ---
+  const toggleLike = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const t = [...media.music, ...media.podcasts].find(x => x.id === id);
+    if (!t) return;
+    if (localStorage.getItem('lk_' + id)) {
+      t.likes--; localStorage.removeItem('lk_' + id);
+    } else {
+      t.likes++; localStorage.setItem('lk_' + id, '1');
+    }
+    setMedia({ ...media });
+    if (sb) await sb.from('likes').upsert({ song_id: id, count: t.likes, duration: t.duration }, { onConflict: 'song_id' });
+  };
+
+  const toggleFav = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = 'fav_' + id;
+    localStorage.getItem(key) ? localStorage.removeItem(key) : localStorage.setItem(key, '1');
+    setMedia({ ...media });
+  };
+
+  const downloadCurrent = async () => {
+    const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
+    if (!t || !window.confirm(`Качаем "${t.title}"?`)) return;
+    try {
+      const r = await fetch(t.url); const b = await r.blob();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+      a.download = t.title + ".mp3"; a.click();
+    } catch (e) { alert("Ошибка загрузки"); }
+  };
+
+  const shareCurrent = async () => {
     const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
     if (!t) return;
-    const r = await fetch(t.url); const b = await r.blob();
-    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = t.title + ".mp3"; a.click();
-  };
-
-  const share = () => {
-    const t = [...media.music, ...media.podcasts].find(x => x.id === curId);
-    if (navigator.share) navigator.share({ title: t?.title, url: window.location.href });
-    else { navigator.clipboard.writeText(window.location.href); alert("Ссылка скопирована"); }
-  };
-
-  const showText = async (item) => {
-    const r = await fetch(item.url); const txt = await r.text();
-    setModal({ show: true, content: txt, type: 'text' });
-  };
-
-  const handleCategory = (c) => {
-    if (c === 'podcasts' && prompt("Пароль?") !== "1285") return alert("Мимо!");
-    setCurrentCategory(c);
-  };
-
-  const getList = () => {
-    if (currentTab === 'my') {
-      const favs = [...media.music, ...media.podcasts].filter(t => localStorage.getItem('fav_' + t.id));
-      return favs.sort((a,b) => myOrder.indexOf(a.id) - myOrder.indexOf(b.id));
+    if (navigator.share) {
+      navigator.share({ title: t.title, url: window.location.href }).catch(()=>{});
+    } else {
+      navigator.clipboard.writeText(t.url); alert("Ссылка в буфере!");
     }
-    if (currentTab === 'home') return media.music.filter(t => t.likes > 0);
-    return media[currentCategory] || [];
   };
 
-  const filtered = getList().filter(i => (i.title || '').toLowerCase().includes(searchQuery.toLowerCase()));
-  const curTrack = [...media.music, ...media.podcasts].find(x => x.id === curId);
+  // --- СОРТИРОВКА И СВАЙПЫ ---
+  const onDragStart = (e: React.TouchEvent, id: string) => { e.stopPropagation(); setDraggingId(id); };
+
+  const onDragMove = useCallback((e: TouchEvent) => {
+    if (!draggingId || !listRef.current) return;
+    const touch = e.touches[0];
+    const elements = Array.from(listRef.current.querySelectorAll('.media-item'));
+    let hoverId = null;
+    elements.forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) hoverId = el.getAttribute('data-id');
+    });
+    if (hoverId && hoverId !== draggingId) {
+      setCustomOrder(prev => {
+        const order = prev.length > 0 ? [...prev] : filteredList.map(t => t.id);
+        const fromIdx = order.indexOf(draggingId); const toIdx = order.indexOf(hoverId as string);
+        if (fromIdx > -1 && toIdx > -1) {
+          order.splice(fromIdx, 1); order.splice(toIdx, 0, draggingId); return order;
+        }
+        return prev;
+      });
+    }
+  }, [draggingId]);
+
+  const onDragEnd = useCallback(() => {
+    if (draggingId) localStorage.setItem('evgen_track_order', JSON.stringify(customOrder));
+    setDraggingId(null);
+  }, [draggingId, customOrder]);
+
+  useEffect(() => {
+    if (draggingId) {
+      document.addEventListener('touchmove', onDragMove, { passive: false });
+      document.addEventListener('touchend', onDragEnd);
+      return () => { document.removeEventListener('touchmove', onDragMove); document.removeEventListener('touchend', onDragEnd); };
+    }
+  }, [draggingId, onDragMove, onDragEnd]);
+
+  const filteredList = useMemo(() => {
+    let list = currentTab === 'home' ? media.music.filter(t => t.likes > 0) : 
+               currentTab === 'my' ? [...media.music, ...media.podcasts].filter(t => localStorage.getItem('fav_' + t.id)) :
+               (media[currentCategory] || []);
+    if (searchQuery) list = list.filter(i => i.title.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (currentTab === 'home' && !searchQuery && customOrder.length > 0) {
+      const sorted: Track[] = []; const rem = [...list];
+      customOrder.forEach(id => { const idx = rem.findIndex(t => t.id === id); if (idx !== -1) sorted.push(rem.splice(idx, 1)[0]); });
+      return [...sorted, ...rem];
+    }
+    return list;
+  }, [media, currentTab, currentCategory, searchQuery, customOrder]);
+
+  const currentTrackObj = [...media.music, ...media.podcasts].find(x => x.id === curId);
 
   return (
-    <div className="app">
+    <div className="app-container">
       <style>{`
+        :root { --neon: #00f2ff; --glass: rgba(255,255,255,0.08); --border: rgba(255,255,255,0.15); }
         body { background: #020617; color: #fff; font-family: sans-serif; margin: 0; padding-bottom: 240px; }
-        .player-panel { position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%); width: calc(100% - 30px); max-width: 500px; background: rgba(13,18,30,0.95); border: 1px solid var(--border); border-radius: 24px; padding: 15px; z-index: 1000; box-sizing: border-box; }
-        .controls { display: flex; justify-content: space-between; align-items: center; }
-        .ctrl-btn { background: none; border: none; fill: #94a3b8; padding: 5px; flex: 1; display: flex; justify-content: center; }
-        .play-btn { width: 55px; height: 55px; background: #00f2ff; border-radius: 50%; fill: #000; border: none; display: flex; justify-content: center; align-items: center; }
-        .progress-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin: 10px 0; }
-        .media-item { display: flex; align-items: center; background: rgba(255,255,255,0.05); margin: 5px; padding: 10px; border-radius: 12px; }
-        .cat-btn { padding: 10px; background: rgba(255,255,255,0.08); border-radius: 8px; text-align: center; cursor: pointer; }
-        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .app-container { padding: 15px; }
+        #bg-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-size: cover; filter: blur(60px) brightness(0.15); z-index: -1; }
+        .main-title { color: var(--neon); text-align: center; font-size: 1.5rem; font-weight: 800; margin: 15px 0; text-shadow: 0 0 10px var(--neon); }
+        .search-box { width: 100%; background: var(--glass); border: 1px solid var(--border); border-radius: 20px; padding: 12px; color: #fff; margin-bottom: 15px; }
+        .category-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 15px; }
+        .cat-card { background: var(--glass); border: 1px solid var(--border); border-radius: 10px; padding: 10px 5px; text-align: center; font-size: 0.7rem; }
+        .cat-card.active { border-color: var(--neon); color: var(--neon); background: rgba(0,242,255,0.1); }
+        .media-item { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px; position: relative; }
+        .media-item.active { border-color: var(--neon); }
+        .drag-handle { padding: 5px; color: #475569; margin-right: 5px; }
+        .media-img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; margin-right: 12px; }
+        .media-info { flex-grow: 1; overflow: hidden; }
+        .media-name { font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 50px; }
+        .item-btns { position: absolute; right: 10px; display: flex; gap: 10px; font-size: 1.1rem; }
+        .player-panel { position: fixed; bottom: 85px; left: 5%; width: 90%; background: rgba(13,18,30,0.9); border: 1px solid var(--border); border-radius: 20px; padding: 15px; backdrop-filter: blur(10px); }
+        .progress-area { height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; margin: 10px 0; }
+        #progress-fill { height: 100%; background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+        .controls-row { display: flex; justify-content: space-between; align-items: center; }
+        .play-btn { width: 50px; height: 50px; background: var(--neon); border-radius: 50%; border: none; display: flex; justify-content: center; align-items: center; }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 70px; background: #0a0f1c; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--border); }
+        .nav-item { color: #64748b; font-size: 0.7rem; text-align: center; }
+        .nav-item.active { color: var(--neon); }
+        #modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        #modal-content { background: #1e293b; padding: 20px; border-radius: 15px; max-height: 70%; overflow: auto; width: 100%; color: #fff; white-space: pre-wrap; }
       `}</style>
 
-      <div style={{textAlign:'center', color:'#00f2ff', padding:'20px', fontWeight:'bold'}}>EVGEN MUSIC</div>
-      <input type="text" placeholder="Поиск..." className="search" style={{width:'90%', margin:'0 5%', padding:'10px', borderRadius:'20px', background:'#1e293b', border:'none', color:'#fff'}} onChange={e => setSearchQuery(e.target.value)} />
+      <div id="bg-layer" style={{ backgroundImage: bgImage ? `url(${bgImage})` : 'none' }}></div>
+      <div className="main-title">EVGEN MUSIC</div>
+      <input type="text" className="search-box" placeholder="Поиск..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
 
       {currentTab === 'catalog' && (
-        <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'5px', padding:'10px'}}>
-          {['music', 'podcasts', 'photos', 'texts'].map(c => <div key={c} className="cat-btn" onClick={() => handleCategory(c)}>{c}</div>)}
+        <div className="category-grid">
+          {['music', 'podcasts', 'photos', 'texts'].map(c => (
+            <div key={c} className={`cat-card ${currentCategory === c ? 'active' : ''}`} onClick={() => setCurrentCategory(c as any)}>{c}</div>
+          ))}
         </div>
       )}
 
-      <div className="list">
-        {filtered.map((item, idx) => (
-          <div key={item.id || idx} className="media-item" 
-               draggable={currentTab === 'my'}
-               onDragStart={() => dragItem.current = idx}
-               onDragEnter={() => dragOverItem.current = idx}
-               onDragEnd={handleSort}
-               onDragOver={e => e.preventDefault()}
-               onClick={() => item.url.endsWith('.txt') ? showText(item) : play(item)}>
-            <img src={item.img || item.url} style={{width:50, height:50, borderRadius:8, marginRight:10}} alt="" />
-            <div style={{flex:1}}>{item.title || 'Photo'}</div>
-            {item.likes !== undefined && <span>{localStorage.getItem('fav_'+item.id)?'⭐':''}</span>}
+      <div className="content-grid" ref={listRef}>
+        {filteredList.map(item => (
+          <div key={item.id} data-id={item.id} className={`media-item ${curId === item.id ? 'active' : ''}`} onClick={() => playTrack(item)}>
+            {currentTab === 'home' && <div className="drag-handle" onTouchStart={e => onDragStart(e, item.id)}>⠿</div>}
+            <img src={item.img} className="media-img" alt="" />
+            <div className="media-info">
+              <div className="media-name">{item.title}</div>
+              <div style={{fontSize:'0.7rem', color:'#94a3b8'}}>{item.duration}</div>
+            </div>
+            <div className="item-btns">
+              <span onClick={e => toggleLike(item.id, e)}>{localStorage.getItem('lk_'+item.id)?'❤️':'🤍'}</span>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="player-panel">
-        <div style={{textAlign:'center', fontSize:'0.8rem', color:'#00f2ff', marginBottom:5}}>{curTrack?.title || 'Выбор трека'}</div>
-        <div className="progress-bar" onClick={e => { audioRef.current.currentTime = (e.nativeEvent.offsetX / e.currentTarget.offsetWidth) * duration }}>
-          <div style={{height:'100%', background:'#00f2ff', width: `${(currentTime/duration*100)||0}%`, borderRadius:3}}></div>
+      {currentTrackObj && (
+        <div className="player-panel">
+          <div style={{textAlign:'center', fontSize:'0.8rem', color: 'var(--neon)'}}>{currentTrackObj.title}</div>
+          <div className="progress-area"><div id="progress-fill" style={{ width: `${(currentTime/audioDuration)*100}%` }}></div></div>
+          <div className="controls-row">
+            <button onClick={handlePrevTrack} style={{background:'none', border:'none', color:'#fff'}}>⏮</button>
+            <button className="play-btn" onClick={togglePlay}>{isPlaying ? '⏸' : '▶️'}</button>
+            <button onClick={handleNextTrack} style={{background:'none', border:'none', color:'#fff'}}>⏭</button>
+            <button onClick={downloadCurrent} style={{background:'none', border:'none', color:'#fff'}}>⬇️</button>
+          </div>
         </div>
-        <div style={{display:'flex', justifyBetween:'space-between', fontSize:'0.7rem', color:'#64748b'}}>
-            <span>{Math.floor(currentTime/60)}:{Math.floor(currentTime%60).toString().padStart(2,'0')}</span>
-            <span style={{marginLeft:'auto'}}>{Math.floor(duration/60)}:{Math.floor(duration%60).toString().padStart(2,'0')}</span>
-        </div>
-        <div className="controls">
-          <button className="ctrl-btn" onClick={share}><svg viewBox="0 0 24 24" width="24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></button>
-          <button className="ctrl-btn" onClick={() => {}}><svg viewBox="0 0 24 24" width="24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
-          <button className="ctrl-btn" onClick={() => audioRef.current.currentTime -= 10}><svg viewBox="0 0 24 24" width="24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg></button>
-          <button className="play-btn" onClick={() => play(curTrack)}><svg viewBox="0 0 24 24" width="30">{isPlaying ? <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/> : <path d="M8 5v14l11-7z"/>}</svg></button>
-          <button className="ctrl-btn" onClick={() => audioRef.current.currentTime += 10}><svg viewBox="0 0 24 24" width="24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg></button>
-          <button className="ctrl-btn" onClick={() => {}}><svg viewBox="0 0 24 24" width="24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-          <button className="ctrl-btn" onClick={download}><svg viewBox="0 0 24 24" width="24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button>
-        </div>
-      </div>
+      )}
 
-      <nav style={{position:'fixed', bottom:0, width:'100%', display:'flex', background:'#0a101f', height:75, borderTop:'1px solid #334155'}}>
-        {['home', 'catalog', 'my'].map(t => <div key={t} onClick={() => setCurrentTab(t)} style={{flex:1, textAlign:'center', paddingTop:15, color:currentTab===t?'#00f2ff':'#64748b'}}>{t}</div>)}
+      <nav className="bottom-nav">
+        <div className={`nav-item ${currentTab === 'home'?'active':''}`} onClick={() => setCurrentTab('home')}>🏠<div>Главная</div></div>
+        <div className={`nav-item ${currentTab === 'catalog'?'active':''}`} onClick={() => setCurrentTab('catalog')}>📁<div>Каталог</div></div>
+        <div className={`nav-item ${currentTab === 'my'?'active':''}`} onClick={() => setCurrentTab('my')}>⭐<div>Моё</div></div>
       </nav>
 
-      {modal.show && <div className="modal" onClick={() => setModal({show:false})}><div style={{background:'#1e293b', padding:20, borderRadius:15, maxHeight:'80%', overflow:'auto'}}>{modal.content}</div></div>}
-      <audio ref={audioRef} onTimeUpdate={() => setCurrentTime(audioRef.current.currentTime)} onLoadedMetadata={() => setDuration(audioRef.current.duration)} />
+      <audio ref={audioRef} onEnded={handleNextTrack} onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)} />
     </div>
   );
-      }
+          }
